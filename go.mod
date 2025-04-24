@@ -1,6 +1,6 @@
 module github.com/nonoo/imagen-telegram-bot
 
-go 1.23.8
+go 1.23.5
 
 require (
 	github.com/go-telegram/bot v1.14.2
