@@ -24,8 +24,9 @@ type ImageFilesDataType struct {
 }
 
 type cmdHandlerType struct {
-	cmdMsg          *models.Message
-	expectImageChan chan ImageFilesDataType
+	cmdMsg            *models.Message
+	expectImageFromID int64
+	expectImageChan   chan ImageFilesDataType
 }
 
 func (c *cmdHandlerType) reply(ctx context.Context, text string) (replyMsg *models.Message, err error) {
@@ -176,9 +177,16 @@ func (c *cmdHandlerType) createMultipartBody(imgs []ImageFilesDataType, argsPres
 }
 
 func (c *cmdHandlerType) ImagenEdit(ctx context.Context, argsPresent []string, n int, prompt, size, background, quality string) {
-	fmt.Println("    waiting for image data...")
 	c.expectImageChan = make(chan ImageFilesDataType)
-	_, _ = c.reply(ctx, "🩻 Please post the image file(s) to process.")
+
+	if c.cmdMsg.ReplyToMessage != nil && (c.cmdMsg.ReplyToMessage.Document != nil || len(c.cmdMsg.ReplyToMessage.Photo) > 0) {
+		c.expectImageFromID = int64(c.cmdMsg.ReplyToMessage.From.ID)
+		go handleImageMessage(ctx, c.cmdMsg.ReplyToMessage)
+	} else {
+		c.expectImageFromID = c.cmdMsg.From.ID
+		fmt.Println("    waiting for image data...")
+		_, _ = c.reply(ctx, "🩻 Please post the image file(s) to process.")
+	}
 
 	var err error
 	var imgs []ImageFilesDataType
@@ -352,6 +360,10 @@ func (c *cmdHandlerType) Imagen(ctx context.Context) {
 		fmt.Println("	No prompt provided")
 		_, _ = c.reply(ctx, errorStr+": No prompt provided")
 		return
+	}
+
+	if c.cmdMsg.ReplyToMessage != nil && (c.cmdMsg.ReplyToMessage.Document != nil || len(c.cmdMsg.ReplyToMessage.Photo) > 0) {
+		isEdit = true
 	}
 
 	fmt.Println("    parsed args: n:", n, "edit:", isEdit, "size:", size, "background:", background, "quality:", quality, "prompt:", prompt)

@@ -134,19 +134,33 @@ func getMimeType(data []byte) (mimeType, extension string) {
 	return detectedMimeType, extension
 }
 
-func handleImage(ctx context.Context, update *models.Update, doc *models.Document) {
+func handleImageMessage(ctx context.Context, msg *models.Message) {
+	var doc *models.Document
+	if msg.Document != nil {
+		doc = msg.Document
+	} else if len(msg.Photo) > 0 {
+		doc = &models.Document{
+			FileID:   msg.Photo[len(msg.Photo)-1].FileID,
+			FileName: msg.Photo[len(msg.Photo)-1].FileUniqueID,
+		}
+	} else {
+		fmt.Println("  no document or photo")
+		return
+	}
+
 	// Searching for the handler that is expecting image data.
-	cmdHandlersMutex.Lock()
-	defer cmdHandlersMutex.Unlock()
 	var cmdHandler *cmdHandlerType
+	cmdHandlersMutex.Lock()
 	for i, h := range cmdHandlers {
-		if h.cmdMsg.From.ID == update.Message.From.ID && h.expectImageChan != nil {
+		if h.expectImageFromID == msg.From.ID && h.expectImageChan != nil {
 			cmdHandler = cmdHandlers[i]
 			break
 		}
 	}
+	cmdHandlersMutex.Unlock()
 
 	if cmdHandler == nil {
+		fmt.Println("  no handler waiting for image data")
 		return
 	}
 
@@ -209,10 +223,10 @@ func handleMessage(ctx context.Context, update *models.Update) {
 		fmt.Println()
 	}
 
-	cmdHandlersMutex.Lock()
 	cmdHandler := cmdHandlerType{
 		cmdMsg: update.Message,
 	}
+	cmdHandlersMutex.Lock()
 	cmdHandlers = append(cmdHandlers, &cmdHandler)
 	cmdHandlersMutex.Unlock()
 
@@ -272,13 +286,8 @@ func telegramBotUpdateHandler(ctx context.Context, b *bot.Bot, update *models.Up
 		return
 	}
 
-	if update.Message.Document != nil {
-		handleImage(ctx, update, update.Message.Document)
-	} else if len(update.Message.Photo) > 0 {
-		handleImage(ctx, update, &models.Document{
-			FileID:   update.Message.Photo[len(update.Message.Photo)-1].FileID,
-			FileName: update.Message.Photo[len(update.Message.Photo)-1].FileUniqueID,
-		})
+	if update.Message.Document != nil || len(update.Message.Photo) > 0 {
+		handleImageMessage(ctx, update.Message)
 	} else if update.Message.Text != "" {
 		handleMessage(ctx, update)
 	}
