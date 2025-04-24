@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-telegram/bot"
@@ -20,7 +23,9 @@ const errorStr = "❌ Error"
 
 var apiClient openai.Client
 var telegramBot *bot.Bot
-var cmdHandler cmdHandlerType
+
+var cmdHandlers []*cmdHandlerType
+var cmdHandlersMutex sync.Mutex
 
 func uploadImages(ctx context.Context, replyToMsg *models.Message, description string, imgs [][]byte) (msg *models.Message, err error) {
 	var media []models.InputMedia
@@ -111,6 +116,82 @@ func sendTextToAdmins(ctx context.Context, s string) {
 	}
 }
 
+func getMimeType(data []byte) (mimeType, extension string) {
+	detectedMimeType := http.DetectContentType(data)
+
+	switch detectedMimeType {
+	case "image/png":
+		extension = ".png"
+	case "image/jpeg":
+		extension = ".jpg"
+	case "image/webp":
+		extension = ".webp"
+	default:
+		detectedMimeType = "application/octet-stream"
+		extension = ".bin"
+	}
+
+	return detectedMimeType, extension
+}
+
+func handleImage(ctx context.Context, update *models.Update, doc *models.Document) {
+	// Searching for the handler that is expecting image data.
+	cmdHandlersMutex.Lock()
+	defer cmdHandlersMutex.Unlock()
+	var cmdHandler *cmdHandlerType
+	for i, h := range cmdHandlers {
+		if h.cmdMsg.From.ID == update.Message.From.ID && h.expectImageChan != nil {
+			cmdHandler = cmdHandlers[i]
+			break
+		}
+	}
+
+	if cmdHandler == nil {
+		return
+	}
+
+	f, err := telegramBot.GetFile(ctx, &bot.GetFileParams{
+		FileID: doc.FileID,
+	})
+	if err != nil {
+		fmt.Println("  can't get file:", err)
+		_, _ = sendReplyToMessage(ctx, cmdHandler.cmdMsg, errorStr+": can't get file: "+err.Error())
+		return
+	}
+	resp, err := http.Get("https://api.telegram.org/file/bot" + params.BotToken + "/" + f.FilePath)
+	if err != nil {
+		fmt.Println("  can't download file:", err)
+		_, _ = sendReplyToMessage(ctx, cmdHandler.cmdMsg, errorStr+": can't download file: "+err.Error())
+		return
+	}
+
+	d, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		fmt.Println("  can't read file:", err)
+		_, _ = sendReplyToMessage(ctx, cmdHandler.cmdMsg, errorStr+": can't read file: "+err.Error())
+		return
+	}
+
+	// Check if the filename already has an extension
+	filename := doc.FileName
+	if len(doc.FileName) == 0 {
+		filename = "image"
+	}
+
+	mimeType, extension := getMimeType(d)
+	if !strings.Contains(doc.FileName, ".") {
+		// Add appropriate extension based on file content
+		filename += extension
+	}
+
+	cmdHandler.expectImageChan <- ImageFilesDataType{
+		Data:     d,
+		Filename: filename,
+		MimeType: mimeType,
+	}
+}
+
 func handleMessage(ctx context.Context, update *models.Update) {
 	fmt.Print("msg from ", update.Message.From.Username, "#", update.Message.From.ID, ": ", update.Message.Text, "\n")
 
@@ -128,6 +209,24 @@ func handleMessage(ctx context.Context, update *models.Update) {
 		fmt.Println()
 	}
 
+	cmdHandlersMutex.Lock()
+	cmdHandler := cmdHandlerType{
+		cmdMsg: update.Message,
+	}
+	cmdHandlers = append(cmdHandlers, &cmdHandler)
+	cmdHandlersMutex.Unlock()
+
+	defer func() {
+		cmdHandlersMutex.Lock()
+		for i, h := range cmdHandlers {
+			if h == &cmdHandler {
+				cmdHandlers = append(cmdHandlers[:i], cmdHandlers[i+1:]...)
+				break
+			}
+		}
+		cmdHandlersMutex.Unlock()
+	}()
+
 	// Check if message is a command.
 	if update.Message.Text[0] == '/' || update.Message.Text[0] == '!' {
 		cmd := strings.Split(update.Message.Text, " ")[0]
@@ -141,11 +240,11 @@ func handleMessage(ctx context.Context, update *models.Update) {
 		switch cmd {
 		case "imagen":
 			fmt.Println("  interpreting as cmd imagen")
-			cmdHandler.Imagen(ctx, update.Message)
+			cmdHandler.Imagen(ctx)
 			return
 		case "imagenhelp":
 			fmt.Println("  interpreting as cmd imagenhelp")
-			cmdHandler.Help(ctx, update.Message, cmdChar)
+			cmdHandler.Help(ctx, cmdChar)
 			return
 		case "start":
 			fmt.Println("  interpreting as cmd start")
@@ -164,7 +263,7 @@ func handleMessage(ctx context.Context, update *models.Update) {
 	}
 
 	if update.Message.Chat.ID >= 0 || (update.Message.ReplyToMessage != nil && update.Message.ReplyToMessage.From.ID == telegramBot.ID()) {
-		cmdHandler.Imagen(ctx, update.Message)
+		cmdHandler.Imagen(ctx)
 	}
 }
 
@@ -173,7 +272,14 @@ func telegramBotUpdateHandler(ctx context.Context, b *bot.Bot, update *models.Up
 		return
 	}
 
-	if update.Message.Text != "" {
+	if update.Message.Document != nil {
+		handleImage(ctx, update, update.Message.Document)
+	} else if len(update.Message.Photo) > 0 {
+		handleImage(ctx, update, &models.Document{
+			FileID:   update.Message.Photo[len(update.Message.Photo)-1].FileID,
+			FileName: update.Message.Photo[len(update.Message.Photo)-1].FileUniqueID,
+		})
+	} else if update.Message.Text != "" {
 		handleMessage(ctx, update)
 	}
 }
@@ -191,6 +297,8 @@ func main() {
 	var cancel context.CancelFunc
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
+
+	typingHandler.Start(ctx)
 
 	opts := []bot.Option{
 		bot.WithDefaultHandler(telegramBotUpdateHandler),
