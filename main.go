@@ -276,7 +276,7 @@ func handleMessage(ctx context.Context, update *models.Update) {
 		}
 	}
 
-	if update.Message.Chat.ID >= 0 || (update.Message.ReplyToMessage != nil && update.Message.ReplyToMessage.From.ID == telegramBot.ID()) {
+	if update.Message.Chat.ID >= 0 {
 		cmdHandler.Imagen(ctx)
 	}
 }
