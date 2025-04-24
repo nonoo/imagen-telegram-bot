@@ -56,7 +56,7 @@ variable. Available OS environment variables are:
 
 ## Supported commands
 
-- `imagen (-edit) (-size 1024x1024) (-background transparent) (-quality auto) [prompt]` - generate an image
+- `imagen (-edit) (-n 1) (-size 1024x1024) (-background transparent) (-quality auto) [prompt]` - generate an image
   All arguments are optional except *prompt*.
   If the *-edit* argument is given, then it will request an edit to the previously uploaded image.
 - `imagenhelp` - show the help
