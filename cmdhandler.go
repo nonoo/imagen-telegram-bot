@@ -219,7 +219,7 @@ func (c *cmdHandlerType) ImagenEdit(ctx context.Context, argsPresent []string, n
 
 	fmt.Println("    got", len(imgs), "images")
 
-	typingHandler.ChangeTypingStatus(c.cmdMsg.Chat.ID, true)
+	typingHandler.ChangeTypingStatus(c.cmdMsg.Chat.ID, c.cmdMsg.ID, true)
 
 	body, contentType, err := c.createMultipartBody(imgs, argsPresent, n, prompt, size, background, quality)
 	if err != nil {
@@ -231,7 +231,7 @@ func (c *cmdHandlerType) ImagenEdit(ctx context.Context, argsPresent []string, n
 	var res openai.ImagesResponse
 	err = apiClient.Post(ctx, "images/edits", body, &res, option.WithHeader("Content-Type", contentType))
 
-	typingHandler.ChangeTypingStatus(c.cmdMsg.Chat.ID, false)
+	typingHandler.ChangeTypingStatus(c.cmdMsg.Chat.ID, c.cmdMsg.ID, false)
 
 	if err != nil {
 		fmt.Println("    edit error:", err)
@@ -252,7 +252,7 @@ type ImageGenerateParams struct {
 }
 
 func (c *cmdHandlerType) ImagenGenerate(ctx context.Context, argsPresent []string, n int, prompt, size, background, quality string) {
-	typingHandler.ChangeTypingStatus(c.cmdMsg.Chat.ID, true)
+	typingHandler.ChangeTypingStatus(c.cmdMsg.Chat.ID, c.cmdMsg.ID, true)
 
 	parms := ImageGenerateParams{
 		Prompt:     prompt,
@@ -272,7 +272,7 @@ func (c *cmdHandlerType) ImagenGenerate(ctx context.Context, argsPresent []strin
 	var res openai.ImagesResponse
 	err = apiClient.Post(ctx, "images/generations", body, &res, option.WithHeader("Content-Type", "application/json"))
 
-	typingHandler.ChangeTypingStatus(c.cmdMsg.Chat.ID, false)
+	typingHandler.ChangeTypingStatus(c.cmdMsg.Chat.ID, c.cmdMsg.ID, false)
 
 	if err != nil {
 		fmt.Println("    generate error:", err)

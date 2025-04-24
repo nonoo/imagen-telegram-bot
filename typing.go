@@ -7,45 +7,48 @@ import (
 )
 
 type TypingChange struct {
-	ChatID   int64
-	IsTyping bool
+	ChatID    int64
+	MessageID int
+	IsTyping  bool
 }
 
 type typingHandlerType struct {
-	ch            chan TypingChange
-	typingOnChats []int64
+	ch        chan TypingChange
+	typingIDs map[int]int64 // map[MessageID]ChatID
 }
 
 var typingHandler typingHandlerType
 
-func (c *typingHandlerType) ChangeTypingStatus(chatID int64, isTyping bool) {
-	c.ch <- TypingChange{
-		ChatID:   chatID,
-		IsTyping: isTyping,
+func (t *typingHandlerType) ChangeTypingStatus(chatID int64, messageID int, isTyping bool) {
+	t.ch <- TypingChange{
+		ChatID:    chatID,
+		MessageID: messageID,
+		IsTyping:  isTyping,
 	}
 }
 
-func (c *typingHandlerType) Process(ctx context.Context) {
+func (t *typingHandlerType) Process(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case typingChange := <-c.ch:
+		case typingChange := <-t.ch:
 			if typingChange.IsTyping {
-				if !slices.Contains(c.typingOnChats, typingChange.ChatID) {
-					c.typingOnChats = append(c.typingOnChats, typingChange.ChatID)
+				if _, exists := t.typingIDs[typingChange.MessageID]; !exists {
+					t.typingIDs[typingChange.MessageID] = typingChange.ChatID
 					sendChatActionTyping(ctx, typingChange.ChatID)
 				}
 			} else {
-				for i, chatID := range c.typingOnChats {
-					if chatID == typingChange.ChatID {
-						c.typingOnChats = append(c.typingOnChats[:i], c.typingOnChats[i+1:]...)
-						break
-					}
+				delete(t.typingIDs, typingChange.MessageID)
+			}
+		case <-time.After(4 * time.Second):
+			var sendTypingToChatIDs []int64
+			for _, chatID := range t.typingIDs {
+				if !slices.Contains(sendTypingToChatIDs, chatID) {
+					sendTypingToChatIDs = append(sendTypingToChatIDs, chatID)
 				}
 			}
-		case <-time.After(5 * time.Second):
-			for _, chatID := range c.typingOnChats {
+			for _, chatID := range sendTypingToChatIDs {
 				sendChatActionTyping(ctx, chatID)
 			}
 		}
@@ -54,6 +57,6 @@ func (c *typingHandlerType) Process(ctx context.Context) {
 
 func (c *typingHandlerType) Start(ctx context.Context) {
 	c.ch = make(chan TypingChange)
-	c.typingOnChats = []int64{}
+	c.typingIDs = make(map[int]int64)
 	go c.Process(ctx)
 }
