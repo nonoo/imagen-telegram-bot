@@ -69,12 +69,14 @@ func (c *cmdHandlerType) ImagenResultProcess(ctx context.Context, res *openai.Im
 		description += "\n🖼️ " + argsDesc
 	}
 
+	fmt.Println("    uploading images...")
 	_, err = uploadImages(ctx, c.cmdMsg, description, imgs)
 	if err != nil {
 		fmt.Println("    upload error:", err)
 		_, _ = c.reply(ctx, errorStr+": "+err.Error())
 		return
 	}
+	fmt.Println("    images uploaded successfully")
 }
 
 var quoteEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"")
@@ -202,6 +204,10 @@ func (c *cmdHandlerType) ImagenEdit(ctx context.Context, argsPresent []string, n
 	var imgs []ImageFilesDataType
 	select {
 	case img := <-c.expectImageChan:
+		if len(img.Data) == 0 {
+			break
+		}
+
 		imgs = append(imgs, img)
 
 		// Wait for more images or timeout
@@ -226,7 +232,8 @@ func (c *cmdHandlerType) ImagenEdit(ctx context.Context, argsPresent []string, n
 	c.expectImageChan = nil
 
 	if err == nil && len(imgs) == 0 {
-		err = fmt.Errorf("got no image data")
+		fmt.Println("    canceled")
+		return
 	}
 
 	if err != nil {
@@ -246,6 +253,7 @@ func (c *cmdHandlerType) ImagenEdit(ctx context.Context, argsPresent []string, n
 		return
 	}
 
+	fmt.Println("    sending edit request...")
 	var res openai.ImagesResponse
 	err = apiClient.Post(ctx, "images/edits", body, &res, option.WithHeader("Content-Type", contentType))
 
@@ -289,6 +297,7 @@ func (c *cmdHandlerType) ImagenGenerate(ctx context.Context, argsPresent []strin
 		return
 	}
 
+	fmt.Println("    sending generate request...")
 	var res openai.ImagesResponse
 	err = apiClient.Post(ctx, "images/generations", body, &res, option.WithHeader("Content-Type", "application/json"))
 
@@ -387,16 +396,41 @@ func (c *cmdHandlerType) Imagen(ctx context.Context) {
 	c.ImagenGenerate(ctx, argsPresent, n, prompt, size, background, quality)
 }
 
+func (c *cmdHandlerType) Cancel(ctx context.Context) {
+	// Searching for the handler that is expecting image data.
+	var cmdHandler *cmdHandlerType
+	cmdHandlersMutex.Lock()
+	defer cmdHandlersMutex.Unlock()
+	for i, h := range cmdHandlers {
+		if h.expectImageFromID == c.cmdMsg.From.ID && h.expectImageChan != nil {
+			cmdHandler = cmdHandlers[i]
+			break
+		}
+	}
+
+	if cmdHandler == nil {
+		fmt.Println("  no handler waiting for image data")
+		_, _ = c.reply(ctx, errorStr+": not waiting for image data")
+		return
+	}
+
+	fmt.Println("  canceling waiting for image data")
+	_, _ = c.reply(ctx, "❌ Canceling waiting for image data")
+	cmdHandler.expectImageFromID = 0
+	cmdHandler.expectImageChan <- ImageFilesDataType{}
+}
+
 func (c *cmdHandlerType) Help(ctx context.Context, cmdChar string) {
 	_, _ = sendReplyToMessage(ctx, c.cmdMsg, "🤖 Imagen Telegram Bot\n\n"+
 		"Available commands:\n\n"+
 		cmdChar+"imagen (args) [prompt]\n"+
 		"  args can be:\n"+
-		"    -edit: toggles edit mode\n"+
+		"    -edit: toggles edit mode (auto enabled if you reply to an image)\n"+
 		"    -n 1: generate n output images\n"+
 		"    -size 1024x1024\n"+
 		"    -background transparent (default is opaque)\n"+
 		"    -quality auto\n"+
+		cmdChar+"imagencancel - cancel waiting for images\n\n"+
 		cmdChar+"imagenhelp - show this help\n\n"+
 		"For more information see https://github.com/nonoo/imagen-telegram-bot and https://platform.openai.com/docs/guides/image-generation")
 }

@@ -256,6 +256,10 @@ func handleMessage(ctx context.Context, update *models.Update) {
 			fmt.Println("  interpreting as cmd imagen")
 			cmdHandler.Imagen(ctx)
 			return
+		case "imagencancel":
+			fmt.Println("  interpreting as cmd imagencancel")
+			cmdHandler.Cancel(ctx)
+			return
 		case "imagenhelp":
 			fmt.Println("  interpreting as cmd imagenhelp")
 			cmdHandler.Help(ctx, cmdChar)
