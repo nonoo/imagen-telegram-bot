@@ -123,6 +123,16 @@ func (c *cmdHandlerType) createMultipartBody(imgs []ImageFilesDataType, argsPres
 		return nil, "", err
 	}
 
+	// Add moderation
+	moderationPart, err := w.CreateFormField("moderation")
+	if err != nil {
+		return nil, "", err
+	}
+	_, err = moderationPart.Write([]byte("low"))
+	if err != nil {
+		return nil, "", err
+	}
+
 	if slices.Contains(argsPresent, "n") {
 		// Add n
 		nPart, err := w.CreateFormField("n")
@@ -257,6 +267,7 @@ type ImageGenerateParams struct {
 	Size       string `json:"size,omitzero"`
 	Quality    string `json:"quality,omitzero"`
 	Background string `json:"background,omitzero"`
+	Moderation string `json:"moderation,omitzero"`
 }
 
 func (c *cmdHandlerType) ImagenGenerate(ctx context.Context, argsPresent []string, n int, prompt, size, background, quality string) {
@@ -269,6 +280,7 @@ func (c *cmdHandlerType) ImagenGenerate(ctx context.Context, argsPresent []strin
 		Size:       size,
 		Quality:    quality,
 		Background: background,
+		Moderation: "low",
 	}
 	body, err := json.Marshal(parms)
 	if err != nil {
